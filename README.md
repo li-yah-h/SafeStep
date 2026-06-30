@@ -1,91 +1,136 @@
-# SafeStep 
+```
+# SafeStep  
+### Offline AI Navigation Assistant for the Visually Impaired
 
-A browser-based version of **SafeStep** (see the original repo, kept as-is
-for backup/reference). SafeStep Final ran entirely on one local machine —
-its own webcam in, its own speakers out. SafeStep moves the camera and
-speakers to the user's browser, while the AI detection and spatial-reasoning
-logic still runs on a server, reused almost unchanged from the original.
+> **SafeStep** is a 100% offline, real-time AI assistant that detects nearby obstacles using a webcam and delivers priority-ranked spoken alerts to visually impaired users through any connected audio device.
 
-## Architecture
+---
+
+## Overview
+
+SafeStep continuously analyzes the user’s surroundings and provides concise, actionable voice guidance, helping users navigate safely without relying on an internet connection.
+
+**Example Alerts**
+- *“Stop! Car directly ahead, one step away.”*
+- *“Person approaching from your left.”*
+- *“Traffic signal detected on your right.”*
+
+---
+
+## Objectives
+
+- Enable safe, independent navigation for visually impaired users  
+- Operate entirely offline for reliability and privacy  
+- Deliver real-time, prioritized audio feedback  
+- Run efficiently on CPU-only, free-tier deployments
+
+---
+
+## System Architecture
 
 ```
-Browser                                    Server (FastAPI)
-┌─────────────────────┐                    ┌──────────────────────────┐
-│ camera.js           │  JPEG frames       │ server.py                │
-│  getUserMedia()     │ ───────────────▶  │  per-connection session: │
-│  captures @ ~4fps   │   (binary WS)      │   InferenceEngine        │
-│                     │                    │   SpatialAnalyzer        │
-│ app.js              │    {alerts,        │                          │
-│  draws boxes on     │   detections}      │ models/inference.py      │
-│  <canvas> overlay   │ ◀───────────────  │                          │
-│                     │   (JSON)           │                          │
-│ audio.js            │                    │ spatial/geometry.py      │
-│  speaks alerts via  │                    │                          │
-│  Web Speech API     │                    │                          │
-└─────────────────────┘                    └──────────────────────────┘
+
+[Webcam] ──► [YOLOv8-Nano Inference] ──► [Spatial Analysis] ──► [Priority Audio Queue] ──► [Earphones]  
+
+````
+
+---
+
+## Processing Pipeline
+
+| Stage | Module | Description |
+|------|-------|-------------|
+| Camera | `core/camera.py` | Captures live video, manages reconnection & rotation |
+| Inference | `models/inference.py` | Object detection & tracking using YOLOv8 + ByteTrack |
+| Spatial Analysis | `spatial/geometry.py` | Converts bounding boxes to clock positions & distance |
+| Audio Output | `audio/queue_manager.py` | Priority-based TTS alerts (danger first) |
+
+---
+
+## Key Features
+
+- **Fully Offline Operation** – No internet required  
+- **Real-Time AI Detection** – Powered by YOLOv8-Nano  
+- **Priority-Based Alerts** – Critical obstacles spoken first  
+- **Low Latency Processing** – Drops stale frames to avoid lag  
+- **Browser-Based Frontend** – No installation for users  
+- **CPU-Friendly Design** – Suitable for free hosting tiers  
+- **Highly Configurable** – FPS, confidence thresholds, cooldowns  
+
+---
+
+## Technology Stack
+
+- **Backend**: Python, FastAPI, WebSockets  
+- **AI Model**: YOLOv8-Nano, ByteTrack  
+- **Frontend**: HTML, CSS, JavaScript  
+- **Audio**: Web Speech API (Text-to-Speech)  
+- **Deployment**: Render
+
+---
+
+## Installation & Setup
+
+### Clone the Repository
+```bash
+git clone https://github.com/li-yah-h/SafeStep-web.git
+cd SafeStep-web
+````
+
+### Backend Setup
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-Each browser tab that connects gets its **own** `InferenceEngine` +
-`SpatialAnalyzer`, created on WebSocket connect and torn down on disconnect.
-This matters because YOLOv8's tracker (ByteTrack) keeps per-stream state —
-sharing one tracker across two different people's camera feeds would mix
-their object tracking together. Model *weights* are loaded once at server
-startup and reused read-only across every session, so adding more users
-doesn't reload the ~6MB model repeatedly — only the lightweight per-session
-tracker/confidence state is duplicated.
+### Run the Server
 
-The server throttles inference to `SERVER_MAX_FPS` (default: 4 frames/sec
-per connection — see `backend/config/settings.py`) and drops frames that
-arrive faster than it can process them, rather than queuing a backlog. This
-is deliberate: on free-tier CPU hosting, a queue of stale frames would mean
-alerts lag behind where obstacles actually are, which is worse than
-processing fewer, fresher frames.
+```bash
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+```
 
-## Project layout
+### Launch Frontend
+
+Open `frontend/static/index.html` in a browser and allow camera & audio permissions.
+
+---
+
+## Project Structure
 
 ```
 safestep-web/
 ├── backend/
-│   ├── server.py              # FastAPI app + WebSocket endpoint
-│   ├── contracts.py     
-│   ├── config/settings.py     
-│   ├── spatial/geometry.py    
-│   ├── models/inference.py  
-│   ├── tests/                 # ported test suites, + 2 new session-isolation tests
+│   ├── server.py              # FastAPI app + WebSocket API
+│   ├── contracts.py           # Data contracts & schemas
+│   ├── config/
+│   │   └── settings.py        # Global configuration
+│   ├── spatial/
+│   │   └── geometry.py        # Spatial reasoning logic
+│   ├── models/
+│   │   └── inference.py       # YOLOv8 inference pipeline
 │   └── requirements.txt
+│
 └── frontend/
     └── static/
-        ├── index.html
-        ├── style.css
-        ├── camera.js       
-        ├── audio.js           
-        └── app.js              # wires camera + WebSocket + audio + overlay together
+        ├── index.html         # Main UI
+        ├── style.css          # Styling
+        ├── camera.js          # Webcam handling
+        ├── audio.js           # Speech synthesis
+        └── app.js             # App orchestration
 ```
 
-## Running locally
+---
 
-```bash
-cd backend
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-uvicorn server:app --host 0.0.0.0 --port 8000 --reload
-```
+## Team Contributions
 
-Then open `http://localhost:8000` in a browser, click **Start watching**,
-and grant camera permission. The first request will download YOLOv8-Nano's
-weights automatically (~6MB) — this requires normal internet access (it
-fetches from Ultralytics' GitHub release assets).
+| Team Member        | Responsibility                                 |
+| ------------------ | ---------------------------------------------- |
+| Diya K             | Camera module (`core/camera.py`)               |
+| Jaliba Nasrin O    | Spatial analysis (`spatial/geometry.py`)       |
+| Lakshmi Priyanka M | Audio & alert queue (`audio/queue_manager.py`) |
+| Liya Mary Paul     | Inference & tracking (`models/inference.py`)   |
 
-> **Note on HTTPS for camera access**: most browsers only allow
-> `getUserMedia()` (camera access) on `https://` or `http://localhost`.
-> Local development on `localhost` is fine as-is. Once deployed, make sure
-> your hosting URL serves over HTTPS (Render and Railway both do this
-> automatically).
-
-### Running the tests
-
-```bash
-cd backend
-python3 tests/test_spatial.py   
-python3 tests/test_inference.py  
-```
+---
